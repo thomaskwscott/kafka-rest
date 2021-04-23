@@ -22,6 +22,7 @@ import io.confluent.kafkarest.extension.KafkaRestContextProvider;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.producer.Producer;
 import org.glassfish.hk2.api.Factory;
 import org.glassfish.hk2.api.TypeLiteral;
@@ -49,6 +50,10 @@ public final class KafkaModule extends AbstractBinder {
 
     bindFactory(ProducerFactory.class)
         .to(new TypeLiteral<Producer<byte[], byte[]>>() { })
+        .in(RequestScoped.class);
+
+    bindFactory(ConsumerFactory.class)
+        .to(new TypeLiteral<Consumer<byte[], byte[]>>() { })
         .in(RequestScoped.class);
   }
 
@@ -101,7 +106,28 @@ public final class KafkaModule extends AbstractBinder {
 
     @Override
     public void dispose(Producer<?, ?> producer) {
+
+    }
+  }
+
+  private static final class ConsumerFactory implements Factory<Consumer<?, ?>> {
+
+    private final Provider<KafkaRestContext> context;
+
+    @Inject
+    private ConsumerFactory(Provider<KafkaRestContext> context) {
+      this.context = requireNonNull(context);
+    }
+
+    @Override
+    public Consumer<byte[], byte[]> provide() {
+      return context.get().getConsumer();
+    }
+
+    @Override
+    public void dispose(Consumer<?, ?> consumer) {
       // Do nothing.
     }
   }
+
 }

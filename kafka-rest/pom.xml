@@ -155,6 +155,11 @@
            <artifactId>bcprov-ext-jdk15on</artifactId>
            <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.glassfish.jersey.media</groupId>
+            <artifactId>jersey-media-sse</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
 

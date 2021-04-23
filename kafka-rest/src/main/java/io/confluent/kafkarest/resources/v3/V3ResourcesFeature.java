@@ -45,6 +45,8 @@ public final class V3ResourcesFeature implements Feature {
     configurable.register(TopicConfigsResource.class);
     configurable.register(TopicsResource.class);
     configurable.register(ListAllTopicsConfigsAction.class);
+    configurable.register(ConsumeResource.class);
+    configurable.register(StreamingConsumeAction.class);
     return true;
   }
 }

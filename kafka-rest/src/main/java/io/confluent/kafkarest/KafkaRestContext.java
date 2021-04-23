@@ -17,6 +17,7 @@ package io.confluent.kafkarest;
 
 import io.confluent.kafkarest.v2.KafkaConsumerManager;
 import org.apache.kafka.clients.admin.Admin;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.producer.Producer;
 
 public interface KafkaRestContext {
@@ -29,9 +30,15 @@ public interface KafkaRestContext {
   @Deprecated
   ProducerPool getProducerPool();
 
+  ConsumerPool getConsumerPool();
+
   KafkaConsumerManager getKafkaConsumerManager();
 
   Admin getAdmin();
+
+  default Consumer<byte[], byte[]> getConsumer() {
+    return getConsumerPool().getConsumer();
+  }
 
   default Producer<byte[], byte[]> getProducer() {
     return getProducerPool().getProducer();

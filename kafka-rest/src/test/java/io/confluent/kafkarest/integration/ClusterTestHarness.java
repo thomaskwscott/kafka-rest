@@ -357,6 +357,50 @@ public abstract class ClusterTestHarness {
     return target.request();
   }
 
+  protected WebTarget target(String path) {
+    return target(path, null, null, null);
+  }
+
+  protected WebTarget target(String path, Map<String, String> queryParams) {
+    return target(path, null, null, queryParams);
+  }
+
+  protected WebTarget target(String path, String templateName, Object templateValue) {
+    return target(path, templateName, templateValue, null);
+  }
+
+  protected WebTarget target(String path,
+                                       String templateName,
+                                       Object templateValue,
+                                       Map<String, String> queryParams) {
+
+    Client client = getClient();
+    // Only configure base application here because as a client we shouldn't need the resources
+    // registered
+    restApp.configureBaseApplication(client);
+    WebTarget target;
+    URI pathUri = null;
+    try {
+      pathUri = new URI(path);
+    } catch (URISyntaxException e) {
+      // Ignore, use restConnect and assume this is a valid path part
+    }
+    if (pathUri != null && pathUri.isAbsolute()) {
+      target = client.target(path);
+    } else {
+      target = client.target(restConnect).path(path);
+    }
+    if (templateName != null && templateValue != null) {
+      target = target.resolveTemplate(templateName, templateValue);
+    }
+    if (queryParams != null) {
+      for (Map.Entry<String, String> queryParam : queryParams.entrySet()) {
+        target = target.queryParam(queryParam.getKey(), queryParam.getValue());
+      }
+    }
+    return target;
+  }
+
   protected Client getClient() {
     return ClientBuilder.newClient();
   }

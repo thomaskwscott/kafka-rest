@@ -20,8 +20,11 @@ import static java.util.Objects.requireNonNull;
 import io.confluent.kafkarest.v2.KafkaConsumerManager;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
+import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 
 /**
@@ -36,6 +39,7 @@ public class DefaultKafkaRestContext implements KafkaRestContext {
 
   private Admin adminClient;
   private Producer<byte[], byte[]> producer;
+  private Consumer<byte[], byte[]> consumer;
 
   /**
    * @deprecated Use {@link #DefaultKafkaRestContext(KafkaRestConfig)} instead.
@@ -64,6 +68,11 @@ public class DefaultKafkaRestContext implements KafkaRestContext {
   }
 
   @Override
+  public ConsumerPool getConsumerPool() {
+    return new ConsumerPool(getConsumer());
+  }
+
+  @Override
   public synchronized KafkaConsumerManager getKafkaConsumerManager() {
     if (kafkaConsumerManager == null) {
       kafkaConsumerManager = new KafkaConsumerManager(config);
@@ -77,6 +86,17 @@ public class DefaultKafkaRestContext implements KafkaRestContext {
       adminClient = AdminClient.create(config.getAdminProperties());
     }
     return adminClient;
+  }
+
+  @Override
+  public Consumer<byte[], byte[]> getConsumer() {
+    if (consumer == null) {
+      consumer = new KafkaConsumer<byte[], byte[]>(
+          config.getConsumerProperties(),
+          new ByteArrayDeserializer(),
+          new ByteArrayDeserializer());
+    }
+    return consumer;
   }
 
   @Override
