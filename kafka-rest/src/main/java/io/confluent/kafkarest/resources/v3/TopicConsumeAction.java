@@ -17,11 +17,7 @@ package io.confluent.kafkarest.resources.v3;
 
 import io.confluent.kafkarest.controllers.ConsumeManager;
 import io.confluent.kafkarest.entities.ConsumeRecord;
-import io.confluent.kafkarest.entities.v3.ConsumeRecordData;
-import io.confluent.kafkarest.entities.v3.ConsumeRecordDataList;
-import io.confluent.kafkarest.entities.v3.ListConsumeRecordsResponse;
-import io.confluent.kafkarest.entities.v3.Resource;
-import io.confluent.kafkarest.entities.v3.ResourceCollection;
+import io.confluent.kafkarest.entities.v3.*;
 import io.confluent.kafkarest.extension.ResourceAccesslistFeature.ResourceName;
 import io.confluent.kafkarest.resources.AsyncResponses;
 import io.confluent.kafkarest.response.CrnFactory;
@@ -30,31 +26,29 @@ import io.confluent.rest.annotations.PerformanceMetric;
 
 import javax.inject.Inject;
 import javax.inject.Provider;
-import javax.ws.rs.DefaultValue;
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
+import javax.validation.Valid;
+import javax.ws.rs.*;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.MediaType;
-
+import java.util.AbstractMap;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
 
-@Path("/v3/clusters/{clusterId}/topics/{topicName}/partitions/{partitionId}/records")
+@Path("/v3/clusters/{clusterId}/topics/{topicName}/consume")
 @ResourceName("api.v3.consume.*")
-public final class ConsumeResource {
+public final class TopicConsumeAction {
 
   private final Provider<ConsumeManager> consumeManager;
   private final CrnFactory crnFactory;
   private final UrlFactory urlFactory;
 
   @Inject
-  public ConsumeResource(
+  public TopicConsumeAction(
       Provider<ConsumeManager> consumeManager,
       CrnFactory crnFactory,
       UrlFactory urlFactory
@@ -64,7 +58,8 @@ public final class ConsumeResource {
     this.urlFactory = requireNonNull(urlFactory);
   }
 
-  @GET
+  @POST
+  @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
   @PerformanceMetric("v3.consume.list")
   @ResourceName("api.v3.consume.list")
@@ -72,14 +67,18 @@ public final class ConsumeResource {
       @Suspended AsyncResponse asyncResponse,
       @PathParam("clusterId") String clusterId,
       @PathParam("topicName") String topicName,
-      @PathParam("partitionId") Integer partitionId,
-      @QueryParam("offset") Long offset,
-      @DefaultValue("1")
-      @QueryParam("pageSize") Integer pageSize
+      @DefaultValue("-1") @QueryParam("timestamp") Long timestamp,
+      @DefaultValue("1")  @QueryParam("page_size") Integer pageSize,
+      @Valid TopicConsumeRequest request
   ) {
-    CompletableFuture<ListConsumeRecordsResponse> response =
-          consumeManager.get()
-              .getRecords(clusterId,topicName,partitionId,offset,pageSize)
+    CompletableFuture<ListConsumeRecordsResponse> response = null;
+        if (timestamp != -1L) {
+          response = consumeManager.get()
+              .getRecords(clusterId,
+                  topicName,
+                  Optional.empty(),
+                  Optional.of(timestamp),
+                  pageSize)
               .thenApply(
                   records ->
                       ListConsumeRecordsResponse.create(
@@ -93,9 +92,7 @@ public final class ConsumeResource {
                                               clusterId,
                                               "topic_name",
                                               topicName,
-                                              "partition_id",
-                                              Integer.toString(partitionId),
-                                              "records"))
+                                              "consume"))
                                       .build())
                               .setData(
                                   records.stream()
@@ -103,12 +100,41 @@ public final class ConsumeResource {
                                           this::toConsumeRecordData)
                                       .collect(Collectors.toList()))
                               .build()));
+        } else {
+          response = consumeManager.get()
+              .getRecords(clusterId,
+                  topicName,
+                  Optional.of(request.getValue().getData().stream().map(
+                    entry -> new AbstractMap.SimpleEntry<Integer,Long>(
+                        entry.getPartitionId(),entry.getOffset())
+                  ).collect(Collectors.toMap(Map.Entry::getKey,Map.Entry::getValue))),
+                  Optional.empty(),
+                  pageSize)
+              .thenApply(
+                  records ->
+                      ListConsumeRecordsResponse.create(
+                          ConsumeRecordDataList.builder()
+                              .setMetadata(
+                                  ResourceCollection.Metadata.builder()
+                                      .setSelf(
+                                          urlFactory.create(
+                                              "v3",
+                                              "clusters",
+                                              clusterId,
+                                              "topic_name",
+                                              topicName,
+                                              "consume"))
+                                      .build())
+                              .setData(
+                                  records.stream()
+                                      .map(
+                                          this::toConsumeRecordData)
+                                      .collect(Collectors.toList()))
+                              .build()));
+        }
 
     AsyncResponses.asyncResume(asyncResponse, response);
   }
-
-
-
 
   private ConsumeRecordData toConsumeRecordData(ConsumeRecord<byte[], byte[]> record) {
     return ConsumeRecordData.fromConsumeRecord(record)

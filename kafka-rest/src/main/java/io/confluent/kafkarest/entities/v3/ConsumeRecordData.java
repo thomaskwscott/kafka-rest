@@ -38,7 +38,7 @@ public abstract class ConsumeRecordData extends Resource {
   public abstract int getPartitionId();
 
   @JsonProperty("key")
-  public abstract String getKey();
+  public abstract Optional<String> getKey();
 
   @JsonProperty("value")
   public abstract Optional<String> getValue();

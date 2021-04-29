@@ -18,28 +18,27 @@ package io.confluent.kafkarest.integration.v3;
 import io.confluent.kafkarest.Versions;
 import io.confluent.kafkarest.entities.v2.BinaryPartitionProduceRequest;
 import io.confluent.kafkarest.entities.v2.BinaryPartitionProduceRequest.BinaryPartitionProduceRecord;
-import io.confluent.kafkarest.entities.v3.*;
+
 import io.confluent.kafkarest.integration.ClusterTestHarness;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.common.serialization.BytesDeserializer;
+
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
+
 import javax.ws.rs.client.Entity;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.Response.Status;
-import java.time.Duration;
+import javax.ws.rs.client.WebTarget;
+import javax.ws.rs.sse.InboundSseEvent;
+import javax.ws.rs.sse.SseEventSource;
 import java.util.*;
 
 import static io.confluent.kafkarest.TestUtils.testWithRetry;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
 
 @RunWith(JUnit4.class)
-public class ConsumeResourceIntegrationTest extends ClusterTestHarness {
+public class StreamingConsumeByPartitionActionIntegrationTest extends ClusterTestHarness {
 
   private static final String topic1 = "topic-1";
   private String baseUrl;
@@ -62,27 +61,36 @@ public class ConsumeResourceIntegrationTest extends ClusterTestHarness {
   }
 
   @Test
-  public void listConsumeRecords_returnsConsumeRecords() {
+  public void streamConsumeRecords_returnsConsumeRecords() {
     // produce to topic1 partition0 and topic2 partition1
     BinaryPartitionProduceRequest request1 =
         BinaryPartitionProduceRequest.create(partitionRecords);
     produce(topic1, 0, request1);
 
-    testWithRetry(
-        () -> {
-          Response response =
-              request("/v3/clusters/" + clusterId + "/topics/" + topic1 + "/partitions/0/records",
-                  new HashMap<String,String>(){{
-                      put("offset", "0");
-                      put("page_size", "1");
-                    }})
-                  .accept(MediaType.APPLICATION_JSON)
-                  .get();
 
-          assertEquals(Status.OK.getStatusCode(), response.getStatus());
-          ConsumeRecordDataList consumeRecordDataList =
-              response.readEntity(ListConsumeRecordsResponse.class).getValue();
-        });
+          WebTarget target = target("/v3/clusters/" + clusterId + "/topics/" + topic1 + "/partitions/0/stream",
+              new HashMap<String,String>(){{
+                put("offset", "0");
+              }});
+          SseEventSource.target(target)
+              .build();
+
+          List<InboundSseEvent> inboundEvents = new ArrayList<>();
+          try (SseEventSource source = SseEventSource.target(target).build()) {
+            source.register(inboundSseEvent -> {
+              System.out.println(inboundSseEvent);
+              inboundEvents.add(inboundSseEvent);
+            });
+            source.open();
+
+            while (inboundEvents.size() < 3) {
+              //Consuming events for 30s
+              Thread.sleep(1000);
+            }
+          } catch (Exception e) {
+            fail();
+          }
+
   }
 
   private void produce(String topicName, int partitionId, BinaryPartitionProduceRequest request) {

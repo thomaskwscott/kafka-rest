@@ -18,6 +18,8 @@ package io.confluent.kafkarest.controllers;
 import io.confluent.kafkarest.entities.ConsumeRecord;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -28,13 +30,26 @@ public interface ConsumeManager {
   /**
    * Returns the list of Kafka {@link ConsumeRecord records} belonging to the {@link
    * io.confluent.kafkarest.entities.Topic} {@link io.confluent.kafkarest.entities.Partition}
-   * with the given {@code offset} and {@code pageSize}.
+   * with the given {@code offset} or {@code timestamp} and {@code pageSize}.
    */
   CompletableFuture<List<ConsumeRecord<byte[],byte[]>>> getRecords(
       String clusterId,
       String topicName,
       Integer partitionId,
-      Long offset,
+      Optional<Long> offset,
+      Optional<Long> timestamp,
+      Integer pageSize);
+
+  /**
+   * Returns the list of Kafka {@link ConsumeRecord records} belonging to the {@link
+   * io.confluent.kafkarest.entities.Topic} with the given {@code offsets} or {@code timestamp}
+   * and {@code pageSize}.
+   */
+  CompletableFuture<List<ConsumeRecord<byte[],byte[]>>> getRecords(
+      String clusterId,
+      String topicName,
+      Optional<Map<Integer,Long>> offsets,
+      Optional<Long> timestamp,
       Integer pageSize);
 
 }

@@ -18,14 +18,11 @@ package io.confluent.kafkarest.integration.v3;
 import io.confluent.kafkarest.Versions;
 import io.confluent.kafkarest.entities.v2.BinaryPartitionProduceRequest;
 import io.confluent.kafkarest.entities.v2.BinaryPartitionProduceRequest.BinaryPartitionProduceRecord;
-
 import io.confluent.kafkarest.integration.ClusterTestHarness;
-
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
-
 
 import javax.ws.rs.client.Entity;
 import javax.ws.rs.client.WebTarget;
@@ -33,12 +30,10 @@ import javax.ws.rs.sse.InboundSseEvent;
 import javax.ws.rs.sse.SseEventSource;
 import java.util.*;
 
-import static io.confluent.kafkarest.TestUtils.testWithRetry;
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
 @RunWith(JUnit4.class)
-public class StreamingConsumeActionIntegrationTest extends ClusterTestHarness {
+public class StreamingConsumeByTopicActionIntegrationTest extends ClusterTestHarness {
 
   private static final String topic1 = "topic-1";
   private String baseUrl;
@@ -57,7 +52,7 @@ public class StreamingConsumeActionIntegrationTest extends ClusterTestHarness {
     super.setUp();
     baseUrl = restConnect;
     clusterId = getClusterId();
-    createTopic(topic1, 1, (short) 1);
+    createTopic(topic1, 2, (short) 1);
   }
 
   @Test
@@ -65,11 +60,14 @@ public class StreamingConsumeActionIntegrationTest extends ClusterTestHarness {
     // produce to topic1 partition0 and topic2 partition1
     BinaryPartitionProduceRequest request1 =
         BinaryPartitionProduceRequest.create(partitionRecords);
+    BinaryPartitionProduceRequest request2 =
+        BinaryPartitionProduceRequest.create(partitionRecords);
     produce(topic1, 0, request1);
+    produce(topic1, 1, request2);
 
-          WebTarget target = target("/v3/clusters/" + clusterId + "/topics/" + topic1 + "/partitions/0/consume",
+          WebTarget target = target("/v3/clusters/" + clusterId + "/topics/" + topic1 + "/stream",
               new HashMap<String,String>(){{
-                put("offset", "0");
+                put("timestamp", "0");
               }});
           SseEventSource.target(target)
               .build();
@@ -82,10 +80,11 @@ public class StreamingConsumeActionIntegrationTest extends ClusterTestHarness {
             });
             source.open();
 
-            while (inboundEvents.size() < 3) {
+            while (inboundEvents.size() < 6) {
               //Consuming events for 30s
               Thread.sleep(1000);
             }
+
           } catch (Exception e) {
             fail();
           }

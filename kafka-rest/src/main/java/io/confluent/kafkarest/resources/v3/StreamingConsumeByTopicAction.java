@@ -16,36 +16,37 @@
 package io.confluent.kafkarest.resources.v3;
 
 import io.confluent.kafkarest.controllers.ConsumeManager;
+import io.confluent.kafkarest.controllers.TopicManager;
 import io.confluent.kafkarest.entities.ConsumeRecord;
-import io.confluent.kafkarest.entities.ConsumerRecord;
-import io.confluent.kafkarest.entities.v3.*;
+import io.confluent.kafkarest.entities.Partition;
+import io.confluent.kafkarest.entities.v3.ConsumeRecordData;
+import io.confluent.kafkarest.entities.v3.Resource;
 import io.confluent.kafkarest.extension.ResourceAccesslistFeature.ResourceName;
-import io.confluent.kafkarest.resources.AsyncResponses;
 import io.confluent.kafkarest.response.CrnFactory;
 import io.confluent.kafkarest.response.UrlFactory;
 import io.confluent.rest.annotations.PerformanceMetric;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.TopicPartition;
 
 import javax.inject.Inject;
 import javax.inject.Provider;
+import javax.swing.text.html.Option;
 import javax.ws.rs.*;
-import javax.ws.rs.container.AsyncResponse;
-import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.sse.OutboundSseEvent;
 import javax.ws.rs.sse.Sse;
 import javax.ws.rs.sse.SseEventSink;
-import java.util.Comparator;
-import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
+import java.util.*;
+import java.util.stream.Collector;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static java.util.Objects.requireNonNull;
 
-@Path("/v3/clusters/{clusterId}/topics/{topicName}/partitions/{partitionId}/consume")
+@Path("/v3/clusters/{clusterId}/topics/{topicName}/stream")
 @ResourceName("api.v3.consume.*")
-public final class StreamingConsumeAction {
+public final class StreamingConsumeByTopicAction {
 
   private final Provider<ConsumeManager> consumeManager;
   private final CrnFactory crnFactory;
@@ -55,7 +56,7 @@ public final class StreamingConsumeAction {
   private OutboundSseEvent.Builder eventBuilder;
 
   @Inject
-  public StreamingConsumeAction(
+  public StreamingConsumeByTopicAction(
       Provider<ConsumeManager> consumeManager,
       CrnFactory crnFactory,
       UrlFactory urlFactory
@@ -73,14 +74,19 @@ public final class StreamingConsumeAction {
       @Context SseEventSink sseEventSink,
       @PathParam("clusterId") String clusterId,
       @PathParam("topicName") String topicName,
-      @PathParam("partitionId") Integer partitionId,
-      @QueryParam("offset") Long offset
+      @DefaultValue("-1") @QueryParam("timestamp") Long timestamp
   ) {
-    Long nextOffset = 0l;
+    Map<Integer,Long> nextOffsets = new HashMap<>();
     try {
+
       while (true) {
         List<ConsumeRecord<byte[], byte[]>> fetched = consumeManager.get()
-            .getRecords(clusterId, topicName, partitionId, nextOffset, 1).get();
+              .getRecords(clusterId,
+                  topicName,
+                  nextOffsets.size() == 0 ? Optional.empty():Optional.of(nextOffsets),
+                  timestamp == -1L ? Optional.empty():Optional.of(timestamp),
+                  1).get();
+
 
         fetched.stream().forEach(message ->
             sseEventSink.send(this.eventBuilder
@@ -93,10 +99,14 @@ public final class StreamingConsumeAction {
                 .build())
         );
 
-        if (!fetched.isEmpty()) {
-          nextOffset = fetched.stream().max(Comparator.
-              comparing(ConsumeRecord::getOffset)).get().getOffset() + 1;
-        }
+        Map<Integer,Long> newOffsets = fetched.stream().collect(Collectors.groupingBy(e -> e.getPartition()))
+              .entrySet().stream().map( entry ->
+                  new AbstractMap.SimpleEntry<Integer,Long>(
+                      entry.getKey(),entry.getValue().stream().max(Comparator.comparing(ConsumeRecord::getOffset)).get().getOffset() + 1)
+              ).collect(Collectors.toMap(Map.Entry::getKey,Map.Entry::getValue));
+        newOffsets.forEach(
+            (key, value) -> nextOffsets.merge( key, value, (v1, v2) -> v2)
+        );
       }
     } catch (Exception e) {
       //e.printStackTrace();
@@ -106,14 +116,11 @@ public final class StreamingConsumeAction {
 
   }
 
-
   @Context
   public void setSse(Sse sse) {
     this.sse = sse;
     this.eventBuilder = sse.newEventBuilder();
   }
-
-
 
   private ConsumeRecordData toConsumeRecordData(ConsumeRecord<byte[], byte[]> record) {
     return ConsumeRecordData.fromConsumeRecord(record)
