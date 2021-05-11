@@ -17,8 +17,11 @@ package io.confluent.kafkarest.entities.v3;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.google.auto.value.AutoValue;
 import io.confluent.kafkarest.entities.ConsumeRecord;
+import io.confluent.kafkarest.entities.EmbeddedFormat;
+import org.apache.kafka.common.errors.SerializationException;
 
 import java.util.Optional;
 
@@ -38,10 +41,10 @@ public abstract class ConsumeRecordData extends Resource {
   public abstract int getPartitionId();
 
   @JsonProperty("key")
-  public abstract Optional<String> getKey();
+  public abstract Optional<JsonNode> getKey();
 
   @JsonProperty("value")
-  public abstract Optional<String> getValue();
+  public abstract Optional<JsonNode> getValue();
 
   @JsonProperty("timestamp")
   public abstract Long getTimestamp();
@@ -50,16 +53,23 @@ public abstract class ConsumeRecordData extends Resource {
   public abstract Long getOffset();
 
   public static Builder builder() {
-    return new AutoValue_ConsumeRecordData.Builder().setKind("KafkaConsumeRecord");
+    return new AutoValue_ConsumeRecordData.Builder()
+        .setKind("KafkaConsumeRecord");
   }
 
-  public static Builder fromConsumeRecord(ConsumeRecord consumeRecord) {
+  public static Builder fromConsumeRecord(ConsumeRecord consumeRecord, EmbeddedFormat format) {
+
     return builder()
         .setClusterId(consumeRecord.getClusterId())
         .setTopicName(consumeRecord.getTopicName())
         .setPartitionId(consumeRecord.getPartition())
-        .setKey(consumeRecord.getKey().toString()) // <- fix this to deserialize properly
-        .setValue(consumeRecord.getValue().toString()) // <- fix this to deserialize properly
+        .setKey(format.getKeyDeserializer().deserialize(consumeRecord.getKey()).orElseThrow(() ->
+            new SerializationException("Couldn't deserialize key")
+        ))
+        .setValue(format.getValueDeserializer().deserialize(
+            consumeRecord.getValue()).orElseThrow(() ->
+            new SerializationException("Couldn't deserialize value")
+        ))
         .setOffset(consumeRecord.getOffset())
         .setTimestamp(consumeRecord.getTimestamp());
   }
@@ -72,8 +82,8 @@ public abstract class ConsumeRecordData extends Resource {
       @JsonProperty("cluster_id") String clusterId,
       @JsonProperty("topic_name") String topicName,
       @JsonProperty("partition_id") Integer partitionId,
-      @JsonProperty("key") String key,
-      @JsonProperty("value") String value,
+      @JsonProperty("key") JsonNode key,
+      @JsonProperty("value") JsonNode value,
       @JsonProperty("timestamp") Long timestamp,
       @JsonProperty("offset") Long offset
   ) {
@@ -103,9 +113,9 @@ public abstract class ConsumeRecordData extends Resource {
 
     public abstract Builder setPartitionId(int partitionId);
 
-    public abstract Builder setKey(String key);
+    public abstract Builder setKey(JsonNode key);
 
-    public abstract Builder setValue(String value);
+    public abstract Builder setValue(JsonNode value);
 
     public abstract Builder setTimestamp(Long timestamp);
 

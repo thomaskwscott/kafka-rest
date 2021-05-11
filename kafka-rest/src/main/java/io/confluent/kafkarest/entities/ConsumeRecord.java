@@ -20,7 +20,7 @@ import com.google.auto.value.AutoValue;
 import javax.annotation.Nullable;
 
 @AutoValue
-public abstract class ConsumeRecord<K, V> {
+public abstract class ConsumeRecord {
 
   ConsumeRecord() {
   }
@@ -30,10 +30,10 @@ public abstract class ConsumeRecord<K, V> {
   public abstract String getTopicName();
 
   @Nullable
-  public abstract K getKey();
+  public abstract byte[] getKey();
 
   @Nullable
-  public abstract V getValue();
+  public abstract byte[] getValue();
 
   public abstract Integer getPartition();
 
@@ -41,15 +41,15 @@ public abstract class ConsumeRecord<K, V> {
 
   public abstract Long getOffset();
 
-  public static <K, V> ConsumeRecord<K, V> create(
+  public static ConsumeRecord create(
       String clusterId,
       String topicName,
-      @Nullable K key,
-      @Nullable V value,
+      @Nullable byte[] key,
+      @Nullable byte[] value,
       Integer partition,
       Long timestamp,
       Long offset) {
-    return new AutoValue_ConsumeRecord<>(
+    return new AutoValue_ConsumeRecord(
         clusterId,
         topicName,
         key,

@@ -24,6 +24,9 @@ import java.util.List;
 @AutoValue
 public abstract class ConsumeRecordDataList extends ResourceCollection<ConsumeRecordData> {
 
+  @JsonProperty("nextToken")
+  public abstract ConsumeNextToken getNextToken();
+
   ConsumeRecordDataList() {
   }
 
@@ -35,12 +38,14 @@ public abstract class ConsumeRecordDataList extends ResourceCollection<ConsumeRe
   static ConsumeRecordDataList fromJson(
       @JsonProperty("kind") String kind,
       @JsonProperty("metadata") Metadata metadata,
-      @JsonProperty("data") List<ConsumeRecordData> data
+      @JsonProperty("data") List<ConsumeRecordData> data,
+      @JsonProperty("nextToken") ConsumeNextToken nextToken
   ) {
     return builder()
         .setKind(kind)
         .setMetadata(metadata)
         .setData(data)
+        .setNextToken(nextToken)
         .build();
   }
 
@@ -50,5 +55,7 @@ public abstract class ConsumeRecordDataList extends ResourceCollection<ConsumeRe
 
     Builder() {
     }
+
+    public abstract Builder setNextToken(ConsumeNextToken nextToken);
   }
 }

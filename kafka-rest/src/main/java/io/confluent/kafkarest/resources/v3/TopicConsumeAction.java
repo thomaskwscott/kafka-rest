@@ -17,7 +17,13 @@ package io.confluent.kafkarest.resources.v3;
 
 import io.confluent.kafkarest.controllers.ConsumeManager;
 import io.confluent.kafkarest.entities.ConsumeRecord;
-import io.confluent.kafkarest.entities.v3.*;
+import io.confluent.kafkarest.entities.EmbeddedFormat;
+import io.confluent.kafkarest.entities.v3.ConsumeRecordData;
+import io.confluent.kafkarest.entities.v3.ConsumeRecordDataList;
+import io.confluent.kafkarest.entities.v3.ListConsumeRecordsResponse;
+import io.confluent.kafkarest.entities.v3.Resource;
+import io.confluent.kafkarest.entities.v3.ResourceCollection;
+import io.confluent.kafkarest.entities.v3.TopicConsumeRequest;
 import io.confluent.kafkarest.extension.ResourceAccesslistFeature.ResourceName;
 import io.confluent.kafkarest.resources.AsyncResponses;
 import io.confluent.kafkarest.response.CrnFactory;
@@ -27,7 +33,13 @@ import io.confluent.rest.annotations.PerformanceMetric;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import javax.validation.Valid;
-import javax.ws.rs.*;
+import javax.ws.rs.Consumes;
+import javax.ws.rs.DefaultValue;
+import javax.ws.rs.POST;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.MediaType;
@@ -67,13 +79,14 @@ public final class TopicConsumeAction {
       @Suspended AsyncResponse asyncResponse,
       @PathParam("clusterId") String clusterId,
       @PathParam("topicName") String topicName,
+      @DefaultValue("BINARY") @PathParam("format") String format,
       @DefaultValue("-1") @QueryParam("timestamp") Long timestamp,
       @DefaultValue("1")  @QueryParam("page_size") Integer pageSize,
       @Valid TopicConsumeRequest request
   ) {
     CompletableFuture<ListConsumeRecordsResponse> response = null;
-        if (timestamp != -1L) {
-          response = consumeManager.get()
+    if (timestamp != -1L) {
+      response = consumeManager.get()
               .getRecords(clusterId,
                   topicName,
                   Optional.empty(),
@@ -96,12 +109,12 @@ public final class TopicConsumeAction {
                                       .build())
                               .setData(
                                   records.stream()
-                                      .map(
-                                          this::toConsumeRecordData)
+                                      .map(record -> toConsumeRecordData(record,
+                                          EmbeddedFormat.valueOf(format)))
                                       .collect(Collectors.toList()))
                               .build()));
-        } else {
-          response = consumeManager.get()
+    } else {
+      response = consumeManager.get()
               .getRecords(clusterId,
                   topicName,
                   Optional.of(request.getValue().getData().stream().map(
@@ -127,17 +140,17 @@ public final class TopicConsumeAction {
                                       .build())
                               .setData(
                                   records.stream()
-                                      .map(
-                                          this::toConsumeRecordData)
+                                      .map(record -> toConsumeRecordData(record,
+                                          EmbeddedFormat.valueOf(format)))
                                       .collect(Collectors.toList()))
                               .build()));
-        }
+    }
 
     AsyncResponses.asyncResume(asyncResponse, response);
   }
 
-  private ConsumeRecordData toConsumeRecordData(ConsumeRecord<byte[], byte[]> record) {
-    return ConsumeRecordData.fromConsumeRecord(record)
+  private ConsumeRecordData toConsumeRecordData(ConsumeRecord record, EmbeddedFormat format) {
+    return ConsumeRecordData.fromConsumeRecord(record, format)
         .setMetadata(
             Resource.Metadata.builder()
                 .setSelf(

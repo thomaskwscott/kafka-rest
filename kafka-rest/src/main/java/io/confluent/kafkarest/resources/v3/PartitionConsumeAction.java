@@ -15,33 +15,38 @@
 
 package io.confluent.kafkarest.resources.v3;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import io.confluent.kafkarest.controllers.ConsumeManager;
 import io.confluent.kafkarest.entities.ConsumeRecord;
-import io.confluent.kafkarest.entities.v3.*;
+import io.confluent.kafkarest.entities.EmbeddedFormat;
+import io.confluent.kafkarest.entities.v3.ConsumeNextToken;
+import io.confluent.kafkarest.entities.v3.ConsumeRecordData;
+import io.confluent.kafkarest.entities.v3.ConsumeRecordDataList;
+import io.confluent.kafkarest.entities.v3.ListConsumeRecordsResponse;
+import io.confluent.kafkarest.entities.v3.Resource;
+import io.confluent.kafkarest.entities.v3.ResourceCollection;
 import io.confluent.kafkarest.extension.ResourceAccesslistFeature.ResourceName;
 import io.confluent.kafkarest.resources.AsyncResponses;
 import io.confluent.kafkarest.response.CrnFactory;
 import io.confluent.kafkarest.response.UrlFactory;
 import io.confluent.rest.annotations.PerformanceMetric;
 
+import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Provider;
-import javax.validation.Valid;
-import javax.ws.rs.DefaultValue;
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
+import javax.ws.rs.*;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.MediaType;
-
 import java.util.AbstractMap;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BinaryOperator;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
@@ -65,7 +70,7 @@ public final class PartitionConsumeAction {
     this.urlFactory = requireNonNull(urlFactory);
   }
 
-  @GET
+  @POST
   @Produces(MediaType.APPLICATION_JSON)
   @PerformanceMetric("v3.consume.list")
   @ResourceName("api.v3.consume.list")
@@ -74,21 +79,43 @@ public final class PartitionConsumeAction {
       @PathParam("clusterId") String clusterId,
       @PathParam("topicName") String topicName,
       @PathParam("partitionId") Integer partitionId,
+      @DefaultValue("BINARY") @QueryParam("format") String format,
       @DefaultValue("-1") @QueryParam("offset") Long offset,
       @DefaultValue("-1") @QueryParam("timestamp") Long timestamp,
-      @DefaultValue("1")  @QueryParam("page_size") Integer pageSize
+      @DefaultValue("1")  @QueryParam("page_size") Integer pageSize,
+      ConsumeNextToken token
   ) {
+
+    if(token != null) {
+      if (!validateToken(token, clusterId, topicName, partitionId)) throw new IllegalArgumentException("next_token does not match clusterId, topicName, partitionId parameters");
+      offset = token.getPosition().get(partitionId);
+      timestamp = token.getTimestamp();
+    }
+
+    Long finalTimestamp = timestamp;
     CompletableFuture<ListConsumeRecordsResponse> response =
           consumeManager.get()
               .getRecords(clusterId,
                   topicName,
                   partitionId,
-                  offset == -1L ? Optional.empty():Optional.of(offset),
-                  timestamp == -1L ? Optional.empty():Optional.of(timestamp),
+                  offset == -1L ? Optional.empty() : Optional.of(offset),
+                  timestamp == -1L ? Optional.empty() : Optional.of(timestamp),
                   pageSize)
               .thenApply(
-                  records ->
-                      ListConsumeRecordsResponse.create(
+                  records -> {
+
+                      List<ConsumeRecordData> consumeRecordDataLst = records.stream()
+                          .map(record -> toConsumeRecordData(record,
+                            EmbeddedFormat.valueOf(format)))
+                          .collect(Collectors.toList());
+
+                      ConsumeNextToken nextToken = getNextToken(clusterId,
+                          topicName,
+                          finalTimestamp,
+                          pageSize,
+                          consumeRecordDataLst);
+
+                      return ListConsumeRecordsResponse.create(
                           ConsumeRecordDataList.builder()
                               .setMetadata(
                                   ResourceCollection.Metadata.builder()
@@ -104,17 +131,52 @@ public final class PartitionConsumeAction {
                                               "records"))
                                       .build())
                               .setData(
-                                  records.stream()
-                                      .map(
-                                          this::toConsumeRecordData)
-                                      .collect(Collectors.toList()))
-                              .build()));
+                                  consumeRecordDataLst
+                                  )
+                              .setNextToken(getNextToken(
+                                  clusterId,
+                                  topicName,
+                                  finalTimestamp,
+                                  pageSize,
+                                  consumeRecordDataLst
+                              ))
+                              .build());
+                  });
 
     AsyncResponses.asyncResume(asyncResponse, response);
   }
 
-  private ConsumeRecordData toConsumeRecordData(ConsumeRecord<byte[], byte[]> record) {
-    return ConsumeRecordData.fromConsumeRecord(record)
+  private boolean validateToken(ConsumeNextToken token, String clusterId, String topicName, Integer partitionId) {
+
+    return token.getClusterId().equals(clusterId) &&
+        token.getTopicName().equals(topicName) &&
+        token.getPosition().containsKey(partitionId);
+  }
+  private ConsumeNextToken getNextToken(String clusterId,
+                                        String topicName,
+                                        Long timestamp,
+                                        Integer pageSize,
+                                        List<ConsumeRecordData> records) {
+    return ConsumeNextToken.builder()
+        .setClusterId(clusterId)
+        .setTopicName(topicName)
+        .setTimestamp(timestamp)
+        .setPageSize(pageSize)
+        .setPosition(
+            records.stream()
+                .collect(Collectors.toMap(ConsumeRecordData::getPartitionId,
+                    Function.identity(),
+                    BinaryOperator.maxBy(Comparator.comparing(ConsumeRecordData::getOffset))))
+            .entrySet().stream().map(entry ->
+                new AbstractMap.SimpleEntry<Integer,Long>(
+                    entry.getKey(),entry.getValue().getOffset()+1L)
+            ).collect(Collectors.toMap(Map.Entry::getKey,Map.Entry::getValue))
+        )
+        .build();
+  }
+
+  private ConsumeRecordData toConsumeRecordData(ConsumeRecord record, EmbeddedFormat format) {
+    return ConsumeRecordData.fromConsumeRecord(record, format)
         .setMetadata(
             Resource.Metadata.builder()
                 .setSelf(

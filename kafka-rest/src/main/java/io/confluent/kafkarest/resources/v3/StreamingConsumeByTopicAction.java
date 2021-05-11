@@ -16,31 +16,35 @@
 package io.confluent.kafkarest.resources.v3;
 
 import io.confluent.kafkarest.controllers.ConsumeManager;
-import io.confluent.kafkarest.controllers.TopicManager;
 import io.confluent.kafkarest.entities.ConsumeRecord;
-import io.confluent.kafkarest.entities.Partition;
+import io.confluent.kafkarest.entities.EmbeddedFormat;
 import io.confluent.kafkarest.entities.v3.ConsumeRecordData;
 import io.confluent.kafkarest.entities.v3.Resource;
 import io.confluent.kafkarest.extension.ResourceAccesslistFeature.ResourceName;
 import io.confluent.kafkarest.response.CrnFactory;
 import io.confluent.kafkarest.response.UrlFactory;
 import io.confluent.rest.annotations.PerformanceMetric;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.common.TopicPartition;
 
 import javax.inject.Inject;
 import javax.inject.Provider;
-import javax.swing.text.html.Option;
-import javax.ws.rs.*;
+import javax.ws.rs.DefaultValue;
+import javax.ws.rs.GET;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.sse.OutboundSseEvent;
 import javax.ws.rs.sse.Sse;
 import javax.ws.rs.sse.SseEventSink;
-import java.util.*;
-import java.util.stream.Collector;
+import java.util.AbstractMap;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static java.util.Objects.requireNonNull;
 
@@ -74,17 +78,18 @@ public final class StreamingConsumeByTopicAction {
       @Context SseEventSink sseEventSink,
       @PathParam("clusterId") String clusterId,
       @PathParam("topicName") String topicName,
+      @DefaultValue("BINARY") @PathParam("format") String format,
       @DefaultValue("-1") @QueryParam("timestamp") Long timestamp
   ) {
     Map<Integer,Long> nextOffsets = new HashMap<>();
     try {
 
       while (true) {
-        List<ConsumeRecord<byte[], byte[]>> fetched = consumeManager.get()
+        List<ConsumeRecord> fetched = consumeManager.get()
               .getRecords(clusterId,
                   topicName,
-                  nextOffsets.size() == 0 ? Optional.empty():Optional.of(nextOffsets),
-                  timestamp == -1L ? Optional.empty():Optional.of(timestamp),
+                  nextOffsets.size() == 0 ? Optional.empty() : Optional.of(nextOffsets),
+                  timestamp == -1L ? Optional.empty() : Optional.of(timestamp),
                   1).get();
 
 
@@ -93,19 +98,22 @@ public final class StreamingConsumeByTopicAction {
                 .id(getResourceName(message))
                 .name("KafkaConsumeRecord")
                 .mediaType(MediaType.APPLICATION_JSON_TYPE)
-                .data(ConsumeRecord.class, toConsumeRecordData(message))
+                .data(ConsumeRecord.class, toConsumeRecordData(message,
+                    EmbeddedFormat.valueOf(format)))
                 .reconnectDelay(1000)
                 .comment("this is offset " + message.getOffset())
                 .build())
         );
 
-        Map<Integer,Long> newOffsets = fetched.stream().collect(Collectors.groupingBy(e -> e.getPartition()))
-              .entrySet().stream().map( entry ->
+        Map<Integer,Long> newOffsets = fetched.stream().collect(Collectors
+            .groupingBy(e -> e.getPartition()))
+              .entrySet().stream().map(entry ->
                   new AbstractMap.SimpleEntry<Integer,Long>(
-                      entry.getKey(),entry.getValue().stream().max(Comparator.comparing(ConsumeRecord::getOffset)).get().getOffset() + 1)
-              ).collect(Collectors.toMap(Map.Entry::getKey,Map.Entry::getValue));
+                      entry.getKey(), entry.getValue().stream()
+                      .max(Comparator.comparing(ConsumeRecord::getOffset)).get().getOffset() + 1)
+              ).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         newOffsets.forEach(
-            (key, value) -> nextOffsets.merge( key, value, (v1, v2) -> v2)
+            (key, value) -> nextOffsets.merge(key, value, (v1, v2) -> v2)
         );
       }
     } catch (Exception e) {
@@ -122,8 +130,8 @@ public final class StreamingConsumeByTopicAction {
     this.eventBuilder = sse.newEventBuilder();
   }
 
-  private ConsumeRecordData toConsumeRecordData(ConsumeRecord<byte[], byte[]> record) {
-    return ConsumeRecordData.fromConsumeRecord(record)
+  private ConsumeRecordData toConsumeRecordData(ConsumeRecord record, EmbeddedFormat format) {
+    return ConsumeRecordData.fromConsumeRecord(record, format)
         .setMetadata(
             Resource.Metadata.builder()
                 .setSelf(
@@ -143,7 +151,7 @@ public final class StreamingConsumeByTopicAction {
         .build();
   }
 
-  private String getResourceName(ConsumeRecord<byte[], byte[]> record) {
+  private String getResourceName(ConsumeRecord record) {
     return crnFactory.create(
         "kafka",
         record.getClusterId(),

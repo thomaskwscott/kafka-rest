@@ -19,6 +19,8 @@ import io.confluent.kafka.schemaregistry.SchemaProvider;
 import io.confluent.kafka.schemaregistry.avro.AvroSchemaProvider;
 import io.confluent.kafka.schemaregistry.json.JsonSchemaProvider;
 import io.confluent.kafka.schemaregistry.protobuf.ProtobufSchemaProvider;
+import io.confluent.kafkarest.controllers.BinaryDeserializer;
+import io.confluent.kafkarest.controllers.RecordDeserializer;
 
 /**
  * Permitted formats for ProduceRecords embedded in produce requests/consume responses, e.g.
@@ -41,6 +43,16 @@ public enum EmbeddedFormat {
     public SchemaProvider getSchemaProvider() {
       throw new UnsupportedOperationException();
     }
+
+    @Override
+    public RecordDeserializer getKeyDeserializer() {
+      return new BinaryDeserializer();
+    }
+
+    @Override
+    public RecordDeserializer getValueDeserializer() {
+      return new BinaryDeserializer();
+    }
   },
 
   JSON {
@@ -51,6 +63,16 @@ public enum EmbeddedFormat {
 
     @Override
     public SchemaProvider getSchemaProvider() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public RecordDeserializer getKeyDeserializer() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public RecordDeserializer getValueDeserializer() {
       throw new UnsupportedOperationException();
     }
   },
@@ -67,6 +89,16 @@ public enum EmbeddedFormat {
     public SchemaProvider getSchemaProvider() {
       return schemaProvider;
     }
+
+    @Override
+    public RecordDeserializer getKeyDeserializer() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public RecordDeserializer getValueDeserializer() {
+      throw new UnsupportedOperationException();
+    }
   },
 
   JSONSCHEMA {
@@ -80,6 +112,16 @@ public enum EmbeddedFormat {
     @Override
     public SchemaProvider getSchemaProvider() {
       return schemaProvider;
+    }
+
+    @Override
+    public RecordDeserializer getKeyDeserializer() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public RecordDeserializer getValueDeserializer() {
+      throw new UnsupportedOperationException();
     }
   },
 
@@ -95,11 +137,25 @@ public enum EmbeddedFormat {
     public SchemaProvider getSchemaProvider() {
       return schemaProvider;
     }
+
+    @Override
+    public RecordDeserializer getKeyDeserializer() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public RecordDeserializer getValueDeserializer() {
+      throw new UnsupportedOperationException();
+    }
   };
 
   public abstract boolean requiresSchema();
 
   public abstract SchemaProvider getSchemaProvider();
+
+  public abstract RecordDeserializer getKeyDeserializer();
+
+  public abstract RecordDeserializer getValueDeserializer();
 
   public static EmbeddedFormat forSchemaType(String schemaType) {
     if (schemaType.equals(AVRO.getSchemaProvider().schemaType())) {

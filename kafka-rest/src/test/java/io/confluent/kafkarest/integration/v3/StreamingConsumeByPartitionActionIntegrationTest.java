@@ -27,14 +27,15 @@ import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
 
+import javax.ws.rs.client.Client;
+import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.client.Entity;
 import javax.ws.rs.client.WebTarget;
 import javax.ws.rs.sse.InboundSseEvent;
 import javax.ws.rs.sse.SseEventSource;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
-import static io.confluent.kafkarest.TestUtils.testWithRetry;
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
 @RunWith(JUnit4.class)
@@ -61,36 +62,38 @@ public class StreamingConsumeByPartitionActionIntegrationTest extends ClusterTes
   }
 
   @Test
-  public void streamConsumeRecords_returnsConsumeRecords() {
-    // produce to topic1 partition0 and topic2 partition1
+  public void streamConsumeRecords_returnsConsumeRecords() throws InterruptedException {
     BinaryPartitionProduceRequest request1 =
         BinaryPartitionProduceRequest.create(partitionRecords);
     produce(topic1, 0, request1);
 
+    Client client = ClientBuilder.newBuilder()
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(2,TimeUnit.SECONDS)
+        .build();
+    WebTarget target = sseTarget("/v3/clusters/" + clusterId + "/topics/" + topic1 + "/partitions/0/stream",
+        new HashMap<String,String>(){{
+          put("offset", "0");
+        }},client);
 
-          WebTarget target = target("/v3/clusters/" + clusterId + "/topics/" + topic1 + "/partitions/0/stream",
-              new HashMap<String,String>(){{
-                put("offset", "0");
-              }});
-          SseEventSource.target(target)
-              .build();
+    List<InboundSseEvent> inboundEvents = new ArrayList<>();
+    try (SseEventSource source = SseEventSource.target(target).build()) {
+      source.register(inboundSseEvent -> {
+        System.out.println(inboundSseEvent);
+        inboundEvents.add(inboundSseEvent);
+      });
+      source.open();
 
-          List<InboundSseEvent> inboundEvents = new ArrayList<>();
-          try (SseEventSource source = SseEventSource.target(target).build()) {
-            source.register(inboundSseEvent -> {
-              System.out.println(inboundSseEvent);
-              inboundEvents.add(inboundSseEvent);
-            });
-            source.open();
+      while (inboundEvents.size() < 3) {
+        //Consuming events
+        Thread.sleep(1000);
+      }
 
-            while (inboundEvents.size() < 3) {
-              //Consuming events for 30s
-              Thread.sleep(1000);
-            }
-          } catch (Exception e) {
-            fail();
-          }
+    } catch (Exception e) {
+      fail();
+    }
 
+    client.close();
   }
 
   private void produce(String topicName, int partitionId, BinaryPartitionProduceRequest request) {

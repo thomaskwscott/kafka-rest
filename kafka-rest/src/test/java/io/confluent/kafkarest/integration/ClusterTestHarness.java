@@ -369,12 +369,25 @@ public abstract class ClusterTestHarness {
     return target(path, templateName, templateValue, null);
   }
 
+  protected WebTarget sseTarget(String path, Map<String, String> queryParams,Client client) {
+    return target(path, null, null, queryParams,client);
+  }
+
+  protected WebTarget target(String path,
+                             String templateName,
+                             Object templateValue,
+                             Map<String, String> queryParams) {
+
+    Client client = getClient();
+    return target(path,templateName,templateValue,queryParams,client);
+  }
+
   protected WebTarget target(String path,
                                        String templateName,
                                        Object templateValue,
-                                       Map<String, String> queryParams) {
+                                       Map<String, String> queryParams,
+                                        Client client) {
 
-    Client client = getClient();
     // Only configure base application here because as a client we shouldn't need the resources
     // registered
     restApp.configureBaseApplication(client);

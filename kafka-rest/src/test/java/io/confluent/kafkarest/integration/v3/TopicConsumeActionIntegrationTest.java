@@ -60,7 +60,7 @@ public class TopicConsumeActionIntegrationTest extends ClusterTestHarness {
   }
 
   @Test
-  public void listConsumeRecords_byTopic_byTimestamp_returnsConsumeRecords() {
+  public void listConsumeRecords_byTopic_returnsConsumeRecords() {
     // produce to topic1 partition0 and topic2 partition1
     BinaryPartitionProduceRequest request1 =
         BinaryPartitionProduceRequest.create(partitionRecords);

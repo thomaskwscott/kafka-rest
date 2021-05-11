@@ -32,7 +32,7 @@ public interface ConsumeManager {
    * io.confluent.kafkarest.entities.Topic} {@link io.confluent.kafkarest.entities.Partition}
    * with the given {@code offset} or {@code timestamp} and {@code pageSize}.
    */
-  CompletableFuture<List<ConsumeRecord<byte[],byte[]>>> getRecords(
+  CompletableFuture<List<ConsumeRecord>> getRecords(
       String clusterId,
       String topicName,
       Integer partitionId,
@@ -45,7 +45,7 @@ public interface ConsumeManager {
    * io.confluent.kafkarest.entities.Topic} with the given {@code offsets} or {@code timestamp}
    * and {@code pageSize}.
    */
-  CompletableFuture<List<ConsumeRecord<byte[],byte[]>>> getRecords(
+  CompletableFuture<List<ConsumeRecord>> getRecords(
       String clusterId,
       String topicName,
       Optional<Map<Integer,Long>> offsets,

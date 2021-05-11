@@ -16,7 +16,6 @@
 package io.confluent.kafkarest.controllers;
 
 import io.confluent.kafkarest.entities.ConsumeRecord;
-import io.confluent.kafkarest.entities.Topic;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -24,7 +23,13 @@ import org.apache.kafka.common.TopicPartition;
 
 import javax.inject.Inject;
 import java.time.Duration;
-import java.util.*;
+import java.util.AbstractMap;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -52,7 +57,7 @@ public class ConsumeManagerImpl implements ConsumeManager {
   }
 
   @Override
-  public CompletableFuture<List<ConsumeRecord<byte[], byte[]>>> getRecords(
+  public CompletableFuture<List<ConsumeRecord>> getRecords(
       String clusterId,
       String topicName,
       Integer partitionId,
@@ -65,20 +70,19 @@ public class ConsumeManagerImpl implements ConsumeManager {
         .thenApply(
             cluster -> {
               TopicPartition fetchPartition = new TopicPartition(topicName, partitionId);
-              long fetchOffset = 0l;
-              if (timestamp.isPresent()) {
-                fetchOffset = consumer.offsetsForTimes(
-                    Collections.singletonMap(fetchPartition, timestamp.get()))
-                    .get(fetchPartition).offset();
-              } else if (!offset.isPresent()) {
-                // we have to be sure that latest offset - pagesize is not before the earliest offset in th log.
-                // If it is the auto.offset.reset policy will kick in.
-                // TODO: write a test to verify this
-                long firstOffset = consumer.beginningOffsets(Collections.singletonList(fetchPartition)).get(fetchPartition);
-                long pageStartOffset = consumer.endOffsets(Collections.singletonList(fetchPartition)).get(fetchPartition) - pageSize;
-                fetchOffset = Math.max(firstOffset,pageStartOffset);
-              } else {
+              long fetchOffset = 0L;
+              if (offset.isPresent()) {
                 fetchOffset = offset.get();
+              } else {
+                if (timestamp.isPresent()) {
+                  fetchOffset = consumer.offsetsForTimes(
+                      Collections.singletonMap(fetchPartition, timestamp.get()))
+                      .get(fetchPartition).offset();
+                } else {
+                  fetchOffset = consumer.endOffsets(
+                      Collections.singletonList(fetchPartition))
+                      .get(fetchPartition);
+                }
               }
 
               return toConsumeRecords(
@@ -93,7 +97,7 @@ public class ConsumeManagerImpl implements ConsumeManager {
   }
 
   @Override
-  public CompletableFuture<List<ConsumeRecord<byte[], byte[]>>> getRecords(
+  public CompletableFuture<List<ConsumeRecord>> getRecords(
       String clusterId,
       String topicName,
       Optional<Map<Integer, Long>> offsets,
@@ -109,26 +113,32 @@ public class ConsumeManagerImpl implements ConsumeManager {
                       topic -> {
 
                         // if we are provided offsets we use those
-                        final Map<TopicPartition, Long> offsetAssignments = offsets.orElse(new HashMap<>()).entrySet().stream().map(
+                        final Map<TopicPartition, Long> offsetAssignments = offsets.orElse(
+                            new HashMap<>()).entrySet().stream().map(
                               entry -> new AbstractMap.SimpleEntry<TopicPartition, Long>(
                                   new TopicPartition(topicName, entry.getKey()), entry.getValue())
                           ).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
                         // we need to fill in any missing partitions with the timestamp offset
-                        List<TopicPartition> partitions = topic.orElseThrow(IllegalArgumentException::new).getPartitions().stream().map(
+                        // (we should cache these as this is expensive)
+                        List<TopicPartition> partitions = topic.orElseThrow(
+                            IllegalArgumentException::new)
+                            .getPartitions().stream().map(
                               partition -> new TopicPartition(topicName, partition.getPartitionId())
                           ).collect(Collectors.toList());
 
-                        if (partitions.size() > offsetAssignments.size())
-                          if (!timestamp.isPresent()) throw new IllegalArgumentException(
-                              "Some partitions do not have provided offsets and a timestamp is not provided as an alternative");
-
-                        final Map<TopicPartition,Long> timestampAssignments = consumer.offsetsForTimes(
-                          partitions.stream().filter(partition -> !offsetAssignments.keySet().contains(partition)).map(
-                              topicPartition -> new AbstractMap.SimpleEntry<TopicPartition, Long>(
-                                  topicPartition, timestamp.get())
-                          ).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue))).entrySet().stream()
-                            .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().offset()));
+                        final Map<TopicPartition, Long> timestampAssignments = consumer
+                            .offsetsForTimes(
+                              partitions.stream().filter(partition -> !offsetAssignments.keySet()
+                                  .contains(partition)).map(
+                                    topicPartition -> new AbstractMap
+                                        .SimpleEntry<TopicPartition, Long>(
+                                      topicPartition, timestamp.orElse(System.currentTimeMillis()))
+                              ).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)))
+                            .entrySet().stream()
+                              .collect(Collectors.toMap(
+                                  Map.Entry::getKey,
+                                  e -> e.getValue().offset()));
 
                         return toConsumeRecords(
                             clusterId,
@@ -145,7 +155,7 @@ public class ConsumeManagerImpl implements ConsumeManager {
               );
   }
 
-  private Map<TopicPartition,List<ConsumerRecord<byte[],byte[]>>> fetchPage(
+  private Map<TopicPartition,List<ConsumerRecord>> fetchPage(
       Map<TopicPartition,Long> assignments) {
     consumer.assign(assignments.keySet());
     assignments.entrySet().stream().forEach(
@@ -153,19 +163,19 @@ public class ConsumeManagerImpl implements ConsumeManager {
     );
     ConsumerRecords records = consumer.poll(Duration.ofMillis(POLL_MS));
     return assignments.keySet().stream().map(
-        topicPartition -> new AbstractMap.SimpleEntry<TopicPartition,List<ConsumerRecord<byte[],byte[]>>>(
+        topicPartition -> new AbstractMap.SimpleEntry<TopicPartition,List<ConsumerRecord>>(
             topicPartition,records.records(topicPartition))
     ).collect(Collectors.toMap(Map.Entry::getKey,Map.Entry::getValue));
   }
 
-  private List<ConsumeRecord<byte[],byte[]>> toConsumeRecords(
-      String clusterId, Map<TopicPartition,List<ConsumerRecord<byte[],byte[]>>> records, Integer pageSize) {
+  private List<ConsumeRecord> toConsumeRecords(
+      String clusterId, Map<TopicPartition,List<ConsumerRecord>> records, Integer pageSize) {
     int recordsPerPartition = pageSize / records.keySet().size();
     // pick any partition and return 1 record
     if (recordsPerPartition == 0) {
-      Map<TopicPartition, List<ConsumerRecord<byte[], byte[]>>> finalRecords = records;
+      Map<TopicPartition, List<ConsumerRecord>> finalRecords = records;
       records = records.entrySet().stream()
-          .filter(entry -> entry.getKey()== finalRecords.keySet()
+          .filter(entry -> entry.getKey() == finalRecords.keySet()
               .toArray()[new Random().nextInt(finalRecords.keySet().size())])
           .collect(Collectors.toMap(Map.Entry::getKey,Map.Entry::getValue));
       recordsPerPartition = 1;
@@ -179,15 +189,12 @@ public class ConsumeManagerImpl implements ConsumeManager {
               record -> ConsumeRecord.create(
                 clusterId,
                 record.topic(),
-                record.key(),
-                record.value(),
+                (byte[])record.key(),
+                (byte[])record.value(),
                 record.partition(),
                 record.timestamp(),
                 record.offset())
         )
     ).collect(Collectors.toList());
   }
-
-
-
 }

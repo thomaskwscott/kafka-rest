@@ -57,7 +57,6 @@ public class StreamingConsumeByTopicActionIntegrationTest extends ClusterTestHar
 
   @Test
   public void streamConsumeRecords_returnsConsumeRecords() {
-    // produce to topic1 partition0 and topic2 partition1
     BinaryPartitionProduceRequest request1 =
         BinaryPartitionProduceRequest.create(partitionRecords);
     BinaryPartitionProduceRequest request2 =

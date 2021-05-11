@@ -15,6 +15,8 @@
 
 package io.confluent.kafkarest.integration.v3;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import io.confluent.kafkarest.Versions;
 import io.confluent.kafkarest.entities.v2.BinaryPartitionProduceRequest;
 import io.confluent.kafkarest.entities.v2.BinaryPartitionProduceRequest.BinaryPartitionProduceRecord;
@@ -63,44 +65,37 @@ public class PartitionConsumeActionIntegrationTest extends ClusterTestHarness {
 
   @Test
   public void listConsumeRecords_byPartition_returnsConsumeRecords() {
-    // produce to topic1 partition0 and topic2 partition1
     BinaryPartitionProduceRequest request1 =
         BinaryPartitionProduceRequest.create(partitionRecords);
     produce(topic1, 0, request1);
 
-    testWithRetry(
-        () -> {
-          Response offsetResponse =
-              request("/v3/clusters/" + clusterId + "/topics/" + topic1 + "/partitions/0/consume",
-                  new HashMap<String,String>(){{
-                      put("offset", "0");
-                      put("page_size", "5");
-                    }})
-                  .accept(MediaType.APPLICATION_JSON)
-                  .get();
+    Response offsetResponse =
+        request("/v3/clusters/" + clusterId + "/topics/" + topic1 + "/partitions/0/consume",
+            new HashMap<String,String>(){{
+              put("offset", "0");
+              put("page_size", "2");
+            }})
+            .accept(MediaType.APPLICATION_JSON)
+            .post(Entity.entity(null, Versions.KAFKA_V2_JSON_BINARY));
 
-          assertEquals(Status.OK.getStatusCode(), offsetResponse.getStatus());
-          ConsumeRecordDataList offsetConsumeRecordDataList =
-              offsetResponse.readEntity(ListConsumeRecordsResponse.class).getValue();
-          System.out.println(offsetConsumeRecordDataList);
+    assertEquals(Status.OK.getStatusCode(), offsetResponse.getStatus());
+    ConsumeRecordDataList offsetConsumeRecordDataList =
+        offsetResponse.readEntity(ListConsumeRecordsResponse.class).getValue();
+    System.out.println(offsetConsumeRecordDataList);
 
-          long lastTimestamp = offsetConsumeRecordDataList.getData().stream().max(Comparator.comparing(ConsumeRecordData::getOffset)).get().getTimestamp();
+    Response timestampResponse =
+        request("/v3/clusters/" + clusterId + "/topics/" + topic1 + "/partitions/0/consume",
+            new HashMap<String,String>(){{
+              put("page_size", "5");
+            }})
+            .accept(MediaType.APPLICATION_JSON)
+            .post(Entity.entity(offsetConsumeRecordDataList.getNextToken(), Versions.KAFKA_V2_JSON_BINARY));
 
-          Response timestampResponse =
-              request("/v3/clusters/" + clusterId + "/topics/" + topic1 + "/partitions/0/consume",
-                  new HashMap<String,String>(){{
-                    put("timestamp", String.valueOf(lastTimestamp));
-                    put("page_size", "5");
-                  }})
-                  .accept(MediaType.APPLICATION_JSON)
-                  .get();
+    assertEquals(Status.OK.getStatusCode(), timestampResponse.getStatus());
+    ConsumeRecordDataList timeStampConsumeRecordDataList =
+        timestampResponse.readEntity(ListConsumeRecordsResponse.class).getValue();
+    System.out.println(timeStampConsumeRecordDataList);
 
-          assertEquals(Status.OK.getStatusCode(), timestampResponse.getStatus());
-          ConsumeRecordDataList timeStampConsumeRecordDataList =
-              timestampResponse.readEntity(ListConsumeRecordsResponse.class).getValue();
-          System.out.println(timeStampConsumeRecordDataList);
-
-        });
   }
 
   private void produce(String topicName, int partitionId, BinaryPartitionProduceRequest request) {
