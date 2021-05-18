@@ -44,6 +44,7 @@ import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.MediaType;
 import java.util.AbstractMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -108,7 +109,8 @@ public final class TopicConsumeAction {
                                               "consume"))
                                       .build())
                               .setData(
-                                  records.stream()
+                                  records.values().stream()
+                                      .flatMap(List::stream)
                                       .map(record -> toConsumeRecordData(record,
                                           EmbeddedFormat.valueOf(format)))
                                       .collect(Collectors.toList()))
@@ -139,7 +141,8 @@ public final class TopicConsumeAction {
                                               "consume"))
                                       .build())
                               .setData(
-                                  records.stream()
+                                  records.values().stream()
+                                      .flatMap(List::stream)
                                       .map(record -> toConsumeRecordData(record,
                                           EmbeddedFormat.valueOf(format)))
                                       .collect(Collectors.toList()))

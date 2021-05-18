@@ -15,11 +15,10 @@
 
 package io.confluent.kafkarest.resources.v3;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import io.confluent.kafkarest.controllers.ConsumeManager;
 import io.confluent.kafkarest.entities.ConsumeRecord;
 import io.confluent.kafkarest.entities.EmbeddedFormat;
+import io.confluent.kafkarest.entities.TopicPartitionRecords;
 import io.confluent.kafkarest.entities.v3.ConsumeNextToken;
 import io.confluent.kafkarest.entities.v3.ConsumeRecordData;
 import io.confluent.kafkarest.entities.v3.ConsumeRecordDataList;
@@ -32,21 +31,23 @@ import io.confluent.kafkarest.response.CrnFactory;
 import io.confluent.kafkarest.response.UrlFactory;
 import io.confluent.rest.annotations.PerformanceMetric;
 
-import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Provider;
-import javax.ws.rs.*;
+import javax.ws.rs.DefaultValue;
+import javax.ws.rs.POST;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
 import javax.ws.rs.container.AsyncResponse;
 import javax.ws.rs.container.Suspended;
 import javax.ws.rs.core.MediaType;
 import java.util.AbstractMap;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.BinaryOperator;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
@@ -86,10 +87,8 @@ public final class PartitionConsumeAction {
       ConsumeNextToken token
   ) {
 
-    if(token != null) {
-      if (!validateToken(token, clusterId, topicName, partitionId)) throw new IllegalArgumentException("next_token does not match clusterId, topicName, partitionId parameters");
+    if (token != null) {
       offset = token.getPosition().get(partitionId);
-      timestamp = token.getTimestamp();
     }
 
     Long finalTimestamp = timestamp;
@@ -104,7 +103,8 @@ public final class PartitionConsumeAction {
               .thenApply(
                   records -> {
 
-                      List<ConsumeRecordData> consumeRecordDataLst = records.stream()
+                      List<ConsumeRecordData> consumeRecordDataLst = records.values().stream()
+                          .flatMap(List::stream)
                           .map(record -> toConsumeRecordData(record,
                             EmbeddedFormat.valueOf(format)))
                           .collect(Collectors.toList());
@@ -113,7 +113,7 @@ public final class PartitionConsumeAction {
                           topicName,
                           finalTimestamp,
                           pageSize,
-                          consumeRecordDataLst);
+                          records.keySet());
 
                       return ListConsumeRecordsResponse.create(
                           ConsumeRecordDataList.builder()
@@ -130,47 +130,25 @@ public final class PartitionConsumeAction {
                                               Integer.toString(partitionId),
                                               "records"))
                                       .build())
-                              .setData(
-                                  consumeRecordDataLst
-                                  )
-                              .setNextToken(getNextToken(
-                                  clusterId,
-                                  topicName,
-                                  finalTimestamp,
-                                  pageSize,
-                                  consumeRecordDataLst
-                              ))
+                              .setData(consumeRecordDataLst)
+                              .setNextToken(nextToken)
                               .build());
                   });
 
     AsyncResponses.asyncResume(asyncResponse, response);
   }
 
-  private boolean validateToken(ConsumeNextToken token, String clusterId, String topicName, Integer partitionId) {
-
-    return token.getClusterId().equals(clusterId) &&
-        token.getTopicName().equals(topicName) &&
-        token.getPosition().containsKey(partitionId);
-  }
   private ConsumeNextToken getNextToken(String clusterId,
                                         String topicName,
                                         Long timestamp,
                                         Integer pageSize,
-                                        List<ConsumeRecordData> records) {
+                                        Set<TopicPartitionRecords> records) {
     return ConsumeNextToken.builder()
-        .setClusterId(clusterId)
-        .setTopicName(topicName)
-        .setTimestamp(timestamp)
-        .setPageSize(pageSize)
         .setPosition(
-            records.stream()
-                .collect(Collectors.toMap(ConsumeRecordData::getPartitionId,
-                    Function.identity(),
-                    BinaryOperator.maxBy(Comparator.comparing(ConsumeRecordData::getOffset))))
-            .entrySet().stream().map(entry ->
+            records.stream().map(entry ->
                 new AbstractMap.SimpleEntry<Integer,Long>(
-                    entry.getKey(),entry.getValue().getOffset()+1L)
-            ).collect(Collectors.toMap(Map.Entry::getKey,Map.Entry::getValue))
+                    entry.getPartition(),entry.getLastOffset() + 1L))
+                .collect(Collectors.toMap(Map.Entry::getKey,Map.Entry::getValue))
         )
         .build();
   }

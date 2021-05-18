@@ -16,6 +16,7 @@
 package io.confluent.kafkarest.controllers;
 
 import io.confluent.kafkarest.entities.ConsumeRecord;
+import io.confluent.kafkarest.entities.TopicPartitionRecords;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -25,11 +26,11 @@ import javax.inject.Inject;
 import java.time.Duration;
 import java.util.AbstractMap;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -57,7 +58,7 @@ public class ConsumeManagerImpl implements ConsumeManager {
   }
 
   @Override
-  public CompletableFuture<List<ConsumeRecord>> getRecords(
+  public CompletableFuture<Map<TopicPartitionRecords, List<ConsumeRecord>>> getRecords(
       String clusterId,
       String topicName,
       Integer partitionId,
@@ -85,11 +86,12 @@ public class ConsumeManagerImpl implements ConsumeManager {
                 }
               }
 
-              return toConsumeRecords(
+              Map<TopicPartition,Long> assignments = Collections.singletonMap(fetchPartition,
+                  fetchOffset);
+              return toTopicPartitionRecords(
                   clusterId,
-                  fetchPage(
-                      Collections.singletonMap(fetchPartition,fetchOffset)
-                  ),
+                  fetchPage(assignments),
+                  assignments,
                   pageSize
               );
             }
@@ -97,7 +99,7 @@ public class ConsumeManagerImpl implements ConsumeManager {
   }
 
   @Override
-  public CompletableFuture<List<ConsumeRecord>> getRecords(
+  public CompletableFuture<Map<TopicPartitionRecords, List<ConsumeRecord>>> getRecords(
       String clusterId,
       String topicName,
       Optional<Map<Integer, Long>> offsets,
@@ -120,7 +122,7 @@ public class ConsumeManagerImpl implements ConsumeManager {
                           ).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
                         // we need to fill in any missing partitions with the timestamp offset
-                        // (we should cache these as this is expensive)
+                        // this will only occur on the first fetch
                         List<TopicPartition> partitions = topic.orElseThrow(
                             IllegalArgumentException::new)
                             .getPartitions().stream().map(
@@ -140,15 +142,16 @@ public class ConsumeManagerImpl implements ConsumeManager {
                                   Map.Entry::getKey,
                                   e -> e.getValue().offset()));
 
-                        return toConsumeRecords(
+                        Map<TopicPartition,Long> assignments = Stream.of(offsetAssignments,
+                            timestampAssignments)
+                            .flatMap(map -> map.entrySet().stream())
+                            .collect(Collectors.toMap(
+                                Map.Entry::getKey,
+                                Map.Entry::getValue));
+                        return toTopicPartitionRecords(
                             clusterId,
-                            fetchPage(
-                                Stream.of(offsetAssignments,timestampAssignments)
-                                    .flatMap(map -> map.entrySet().stream())
-                                    .collect(Collectors.toMap(
-                                        Map.Entry::getKey,
-                                        Map.Entry::getValue))
-                            ),
+                            fetchPage(assignments),
+                            assignments,
                             pageSize
                         );
                       }
@@ -168,33 +171,45 @@ public class ConsumeManagerImpl implements ConsumeManager {
     ).collect(Collectors.toMap(Map.Entry::getKey,Map.Entry::getValue));
   }
 
-  private List<ConsumeRecord> toConsumeRecords(
-      String clusterId, Map<TopicPartition,List<ConsumerRecord>> records, Integer pageSize) {
-    int recordsPerPartition = pageSize / records.keySet().size();
-    // pick any partition and return 1 record
-    if (recordsPerPartition == 0) {
-      Map<TopicPartition, List<ConsumerRecord>> finalRecords = records;
-      records = records.entrySet().stream()
-          .filter(entry -> entry.getKey() == finalRecords.keySet()
-              .toArray()[new Random().nextInt(finalRecords.keySet().size())])
-          .collect(Collectors.toMap(Map.Entry::getKey,Map.Entry::getValue));
-      recordsPerPartition = 1;
+  private Map<TopicPartitionRecords,List<ConsumeRecord>> toTopicPartitionRecords(
+      String clusterId,
+      Map<TopicPartition,List<ConsumerRecord>> records,
+      Map<TopicPartition,Long> assignments,
+      Integer pageSize) {
+
+    // check if we need to trim
+    int totalRecordCount = records.values().stream()
+        .mapToInt(List::size)
+        .sum();
+    if (totalRecordCount > pageSize) {
+      // flatten, sort by timestamp, truncate top page size and re-separate
+      records = records.values().stream()
+          .flatMap(List::stream)
+          .sorted(Comparator.comparing(ConsumerRecord::timestamp))
+          .limit(pageSize)
+          .sorted(Comparator.comparing(ConsumerRecord::offset))
+          .collect(Collectors.groupingBy(record -> new TopicPartition(record.topic(),
+              record.partition())));
     }
 
-    int finalRecordsPerPartition = recordsPerPartition;
-    return records.entrySet().stream().flatMap(
-        entry -> entry.getValue().subList(0,
-            Math.min(finalRecordsPerPartition,entry.getValue().size()))
-            .stream().map(
-              record -> ConsumeRecord.create(
-                clusterId,
-                record.topic(),
-                (byte[])record.key(),
-                (byte[])record.value(),
-                record.partition(),
-                record.timestamp(),
-                record.offset())
-        )
-    ).collect(Collectors.toList());
+    Map<TopicPartition, List<ConsumerRecord>> finalRecords1 = records;
+    return assignments.entrySet().stream().map(
+        e -> new AbstractMap.SimpleEntry<TopicPartitionRecords,List<ConsumeRecord>>(
+        TopicPartitionRecords.create(
+            clusterId,
+            e.getKey().topic(),
+            e.getKey().partition(),
+            e.getValue(),
+            finalRecords1.get(e.getKey()).stream().max(Comparator.comparing(r -> r.offset()))
+                .get().offset()
+        ), finalRecords1.get(e.getKey()).stream().map(r -> ConsumeRecord.create(clusterId,
+            e.getKey().topic(),
+            (byte[])r.key(),
+            (byte[])r.value(),
+            e.getKey().partition(),
+            r.timestamp(),
+            r.offset()
+        )).collect(Collectors.toList()))
+    ).collect(Collectors.toMap(Map.Entry::getKey,Map.Entry::getValue));
   }
 }

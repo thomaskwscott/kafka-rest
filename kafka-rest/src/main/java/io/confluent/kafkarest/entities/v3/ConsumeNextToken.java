@@ -27,18 +27,6 @@ public abstract class ConsumeNextToken {
   ConsumeNextToken() {
   }
 
-  @JsonProperty("cluster_id")
-  public abstract String getClusterId();
-
-  @JsonProperty("topic_name")
-  public abstract String getTopicName();
-
-  @JsonProperty("timestamp")
-  public abstract long getTimestamp();
-
-  @JsonProperty("page_size")
-  public abstract int getPageSize();
-
   @JsonProperty("position")
   public abstract Map<Integer,Long> getPosition();
 
@@ -48,17 +36,9 @@ public abstract class ConsumeNextToken {
 
   @JsonCreator
   static ConsumeNextToken fromJson(
-      @JsonProperty("cluster_id") String clusterId,
-      @JsonProperty("topic_name") String topicName,
-      @JsonProperty("timestamp") Long timestamp,
-      @JsonProperty("page_size") Integer pageSize,
       @JsonProperty("position") Map<Integer,Long> position
   ) {
     return builder()
-        .setClusterId(clusterId)
-        .setTopicName(topicName)
-        .setTimestamp(timestamp)
-        .setPageSize(pageSize)
         .setPosition(position)
         .build();
   }
@@ -68,14 +48,6 @@ public abstract class ConsumeNextToken {
 
     Builder() {
     }
-
-    public abstract Builder setClusterId(String clusterId);
-
-    public abstract Builder setTopicName(String topicName);
-
-    public abstract Builder setTimestamp(Long timestamp);
-
-    public abstract Builder setPageSize(Integer pageSize);
 
     public abstract Builder setPosition(Map<Integer, Long> position);
 

@@ -41,6 +41,7 @@ import javax.ws.rs.sse.SseEventSink;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static java.util.Objects.requireNonNull;
 
@@ -87,7 +88,9 @@ public final class StreamingConsumeByPartitionAction {
                 partitionId,
                 Optional.of(nextOffset),
                 Optional.empty(),
-                1).get();
+                1).get().values().stream()
+            .flatMap(List::stream)
+            .collect(Collectors.toList());
 
         fetched.stream().forEach(message ->
             sseEventSink.send(this.eventBuilder

@@ -90,7 +90,9 @@ public final class StreamingConsumeByTopicAction {
                   topicName,
                   nextOffsets.size() == 0 ? Optional.empty() : Optional.of(nextOffsets),
                   timestamp == -1L ? Optional.empty() : Optional.of(timestamp),
-                  1).get();
+                  1).get().values().stream()
+            .flatMap(List::stream)
+            .collect(Collectors.toList());;
 
 
         fetched.stream().forEach(message ->
