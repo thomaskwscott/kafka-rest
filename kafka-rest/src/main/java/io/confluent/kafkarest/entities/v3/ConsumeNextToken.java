@@ -24,7 +24,7 @@ import java.util.Map;
 @AutoValue
 public abstract class ConsumeNextToken {
 
-  ConsumeNextToken() {
+  public ConsumeNextToken() {
   }
 
   @JsonProperty("position")
@@ -53,5 +53,6 @@ public abstract class ConsumeNextToken {
 
     public abstract ConsumeNextToken build();
   }
+
 }
 

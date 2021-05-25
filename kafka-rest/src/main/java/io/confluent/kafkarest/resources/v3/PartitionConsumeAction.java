@@ -15,6 +15,10 @@
 
 package io.confluent.kafkarest.resources.v3;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.gson.GsonBuilder;
+import io.confluent.kafkarest.KafkaRestContext;
 import io.confluent.kafkarest.controllers.ConsumeManager;
 import io.confluent.kafkarest.entities.ConsumeRecord;
 import io.confluent.kafkarest.entities.EmbeddedFormat;
@@ -47,6 +51,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
@@ -59,16 +64,19 @@ public final class PartitionConsumeAction {
   private final Provider<ConsumeManager> consumeManager;
   private final CrnFactory crnFactory;
   private final UrlFactory urlFactory;
+  private final KafkaRestContext ctx;
 
   @Inject
   public PartitionConsumeAction(
       Provider<ConsumeManager> consumeManager,
       CrnFactory crnFactory,
-      UrlFactory urlFactory
+      UrlFactory urlFactory,
+      KafkaRestContext ctx
   ) {
     this.consumeManager = requireNonNull(consumeManager);
     this.crnFactory = requireNonNull(crnFactory);
     this.urlFactory = requireNonNull(urlFactory);
+    this.ctx = ctx;
   }
 
   @POST
@@ -84,11 +92,11 @@ public final class PartitionConsumeAction {
       @DefaultValue("-1") @QueryParam("offset") Long offset,
       @DefaultValue("-1") @QueryParam("timestamp") Long timestamp,
       @DefaultValue("1")  @QueryParam("page_size") Integer pageSize,
-      ConsumeNextToken token
+      @DefaultValue("unset") @QueryParam("nextCursor") String nextCursor
   ) {
 
-    if (token != null) {
-      offset = token.getPosition().get(partitionId);
+    if (!nextCursor.equals("unset")) {
+      offset = offsetFromToken(nextCursor, partitionId);
     }
 
     Long finalTimestamp = timestamp;
@@ -109,10 +117,7 @@ public final class PartitionConsumeAction {
                             EmbeddedFormat.valueOf(format)))
                           .collect(Collectors.toList());
 
-                      ConsumeNextToken nextToken = getNextToken(clusterId,
-                          topicName,
-                          finalTimestamp,
-                          pageSize,
+                      String newCursor = getNextCursor(
                           records.keySet());
 
                       return ListConsumeRecordsResponse.create(
@@ -131,19 +136,28 @@ public final class PartitionConsumeAction {
                                               "records"))
                                       .build())
                               .setData(consumeRecordDataLst)
-                              .setNextToken(nextToken)
+                              .setNextCursor(newCursor)
                               .build());
                   });
 
     AsyncResponses.asyncResume(asyncResponse, response);
   }
 
-  private ConsumeNextToken getNextToken(String clusterId,
-                                        String topicName,
-                                        Long timestamp,
-                                        Integer pageSize,
-                                        Set<TopicPartitionRecords> records) {
-    return ConsumeNextToken.builder()
+  private Long offsetFromToken(String cursor, Integer partitionId) {
+
+    String serializedToken = ctx.getKafkaCursorManager().getCursorPosition(cursor);
+    ConsumeNextToken token = null;
+    try {
+      token = new ObjectMapper().readValue(serializedToken,
+          ConsumeNextToken.class);
+    } catch (JsonProcessingException e) {
+      e.printStackTrace();
+    }
+    return token.getPosition().get(partitionId);
+  }
+
+  private String getNextCursor(Set<TopicPartitionRecords> records) {
+    ConsumeNextToken token = ConsumeNextToken.builder()
         .setPosition(
             records.stream().map(entry ->
                 new AbstractMap.SimpleEntry<Integer,Long>(
@@ -151,6 +165,10 @@ public final class PartitionConsumeAction {
                 .collect(Collectors.toMap(Map.Entry::getKey,Map.Entry::getValue))
         )
         .build();
+    String cursor = UUID.randomUUID().toString();
+    System.out.println(cursor);
+    ctx.getKafkaCursorManager().setCursorPosition(cursor,new GsonBuilder().create().toJson(token));
+    return cursor;
   }
 
   private ConsumeRecordData toConsumeRecordData(ConsumeRecord record, EmbeddedFormat format) {

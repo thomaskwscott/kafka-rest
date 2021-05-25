@@ -34,6 +34,8 @@ public interface KafkaRestContext {
 
   KafkaConsumerManager getKafkaConsumerManager();
 
+  KafkaCursorManager getKafkaCursorManager();
+
   Admin getAdmin();
 
   default Consumer<byte[], byte[]> getConsumer() {

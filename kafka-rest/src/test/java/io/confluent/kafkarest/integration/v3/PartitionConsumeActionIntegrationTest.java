@@ -206,9 +206,10 @@ public class PartitionConsumeActionIntegrationTest extends ClusterTestHarness {
         request("/v3/clusters/" + clusterId + "/topics/" + topic1 + "/partitions/0/consume",
             new HashMap<String,String>(){{
               put("page_size", "5");
+              put("nextCursor", offsetConsumeRecordDataList.getNextCursor());
             }})
             .accept(MediaType.APPLICATION_JSON)
-            .post(Entity.entity(offsetConsumeRecordDataList.getNextToken(), Versions.KAFKA_V2_JSON_BINARY));
+            .post(Entity.entity(null, Versions.KAFKA_V2_JSON_BINARY));
 
     assertEquals(Status.OK.getStatusCode(), tokenResponse.getStatus());
     ConsumeRecordDataList tokenConsumeRecordDataList =

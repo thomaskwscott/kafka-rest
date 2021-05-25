@@ -20,12 +20,15 @@ import static java.util.Objects.requireNonNull;
 import io.confluent.kafkarest.v2.KafkaConsumerManager;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
+
+import java.util.Collections;
 
 /**
  * Shared, global state for the REST proxy server, including configuration and connection pools.
@@ -36,6 +39,7 @@ public class DefaultKafkaRestContext implements KafkaRestContext {
 
   private final KafkaRestConfig config;
   private KafkaConsumerManager kafkaConsumerManager;
+  private KafkaCursorManager kafkaCursorManager;
 
   private Admin adminClient;
   private Producer<byte[], byte[]> producer;
@@ -78,6 +82,29 @@ public class DefaultKafkaRestContext implements KafkaRestContext {
       kafkaConsumerManager = new KafkaConsumerManager(config);
     }
     return kafkaConsumerManager;
+  }
+
+  @Override
+  public synchronized KafkaCursorManager getKafkaCursorManager() {
+    if (kafkaCursorManager == null) {
+      // looks like we have to precreate the topic
+      Admin admin = null;
+      try {
+
+        admin = AdminClient.create(config.getAdminProperties());
+        admin.createTopics(Collections.singletonList(
+            new NewTopic(KafkaCursorManager.REST_PROXY_CURSORS, 1,(short)1)
+        )).all().get();
+      } catch (Exception e) {
+        // todo do something here
+      } finally {
+        if (admin != null) {
+          admin.close();
+        }
+      }
+      kafkaCursorManager = new KafkaCursorManager(config);
+    }
+    return kafkaCursorManager;
   }
 
   @Override
