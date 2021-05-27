@@ -21,19 +21,23 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KafkaStreams;
 import org.apache.kafka.streams.StoreQueryParameters;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.StreamsConfig;
-import org.apache.kafka.streams.kstream.GlobalKTable;
-import org.apache.kafka.streams.kstream.Materialized;
-import org.apache.kafka.streams.state.KeyValueStore;
-import org.apache.kafka.streams.state.QueryableStoreTypes;
+import org.apache.kafka.streams.kstream.Consumed;
+import org.apache.kafka.streams.kstream.Window;
+import org.apache.kafka.streams.kstream.Windowed;
+import org.apache.kafka.streams.kstream.internals.TimeWindow;
+import org.apache.kafka.streams.processor.api.Processor;
+import org.apache.kafka.streams.processor.api.ProcessorContext;
+import org.apache.kafka.streams.processor.api.Record;
+import org.apache.kafka.streams.state.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Properties;
 
 public class KafkaCursorManager {
@@ -58,15 +62,17 @@ public class KafkaCursorManager {
 
     // Create a global table for cursors. The data from this global table
     // will be fully replicated on each instance of this application.
-
-    final GlobalKTable<String,String>
-        cursors =
-        builder.globalTable(REST_PROXY_CURSORS,
-            Materialized.<String, String, KeyValueStore<Bytes, byte[]>>as(REST_PROXY_CURSOR_STORE)
-            .withKeySerde(Serdes.String())
-            .withValueSerde(Serdes.String())
-            .withRetention(Duration.ofHours(4L))
-        );
+    builder.addGlobalStore(
+            Stores.sessionStoreBuilder(
+                Stores.persistentSessionStore(REST_PROXY_CURSOR_STORE,
+                    Duration.ofMinutes(10)
+                    ),
+                Serdes.String(),
+                Serdes.String()),
+            REST_PROXY_CURSORS,
+            Consumed.with(Serdes.String(), Serdes.String()),
+        () -> new GlobalStoreUpdater<>(REST_PROXY_CURSOR_STORE)
+    );
 
     streams = new KafkaStreams(builder.build(), streamsProperties);
     streams.start();
@@ -75,11 +81,9 @@ public class KafkaCursorManager {
   public String getCursorPosition(String cursor) {
     Object fetched = null;
     System.out.println("start fetch time: " + System.currentTimeMillis());
-    //while (fetched == null) {
-      fetched = streams.store(StoreQueryParameters.fromNameAndType("rest-proxy-cursor-store",
-          QueryableStoreTypes.keyValueStore()
-      )).get(cursor);
-    //}
+    fetched = streams.store(StoreQueryParameters.fromNameAndType("rest-proxy-cursor-store",
+          QueryableStoreTypes.sessionStore()
+      )).fetch(cursor).next().value;
     System.out.println("end fetch time: " + System.currentTimeMillis());
     return fetched.toString();
   }
@@ -87,16 +91,56 @@ public class KafkaCursorManager {
   public void setCursorPosition(String cursor,String position) {
     Properties producerProps = new Properties();
     producerProps.putAll(config.getProducerConfigs());
-    producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+    producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
+        StringSerializer.class.getName());
     producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
         StringSerializer.class.getName());
     Producer<String,String> producer = new KafkaProducer<>(producerProps);
-    ProducerRecord<String,String> record = new ProducerRecord<>(REST_PROXY_CURSORS,cursor,position);
+    ProducerRecord<String,String> record = new ProducerRecord<>(
+        REST_PROXY_CURSORS,
+        cursor,
+        position);
     try {
       producer.send(record).get();
     } catch (Exception e) {
       log.error("Couldn't update cursor store",e);
     }
+  }
+
+  // Processor that keeps the global store updated.
+  private static class GlobalStoreUpdater<K, V, I, O>
+      implements Processor<K, V, I, O> {
+
+    private final String storeName;
+
+    public GlobalStoreUpdater(final String storeName) {
+      this.storeName = storeName;
+    }
+
+    private SessionStore<K, V> store;
+
+    @Override
+    public void init(
+        final ProcessorContext<I, O> processorContext) {
+      store = processorContext.getStateStore(storeName);
+    }
+
+    @Override
+    public void process(final Record<K, V> record) {
+      KeyValueIterator<Windowed<K>,V> iter =  store.fetch(record.key());
+      Window newWindow = new TimeWindow(System.currentTimeMillis() - 60000,System.currentTimeMillis());
+      if (iter.hasNext()) {
+          newWindow = iter.next().key.window();
+      }
+      store.put(new Windowed<K>(record.key(), newWindow), record.value());
+
+    }
+
+    @Override
+    public void close() {
+      // No-op
+    }
+
   }
 
 }

@@ -96,7 +96,10 @@ public final class PartitionConsumeAction {
   ) {
 
     if (!nextCursor.equals("unset")) {
-      offset = offsetFromToken(nextCursor, partitionId);
+      System.out.println("nextCursor: " + nextCursor);
+      String providedCursor = nextCursor.split("_")[0];
+      String providedTokenId = nextCursor.split("_")[1];
+      offset = offsetFromToken(providedCursor, providedTokenId, partitionId);
     }
 
     Long finalTimestamp = timestamp;
@@ -143,20 +146,24 @@ public final class PartitionConsumeAction {
     AsyncResponses.asyncResume(asyncResponse, response);
   }
 
-  private Long offsetFromToken(String cursor, Integer partitionId) {
-
-    String serializedToken = ctx.getKafkaCursorManager().getCursorPosition(cursor);
+  private Long offsetFromToken(String cursor, String tokenId, Integer partitionId) {
+    String fetchedTokenId = "";
     ConsumeNextToken token = null;
-    try {
-      token = new ObjectMapper().readValue(serializedToken,
-          ConsumeNextToken.class);
-    } catch (JsonProcessingException e) {
-      e.printStackTrace();
+    while (!fetchedTokenId.equals(tokenId)) {
+      String serializedToken = ctx.getKafkaCursorManager().getCursorPosition(cursor);
+      try {
+        token = new ObjectMapper().readValue(serializedToken,
+            ConsumeNextToken.class);
+      } catch (JsonProcessingException e) {
+        e.printStackTrace();
+      }
+      fetchedTokenId = token.getId();
     }
     return token.getPosition().get(partitionId);
   }
 
   private String getNextCursor(Set<TopicPartitionRecords> records) {
+    String tokenId = UUID.randomUUID().toString();
     ConsumeNextToken token = ConsumeNextToken.builder()
         .setPosition(
             records.stream().map(entry ->
@@ -164,11 +171,12 @@ public final class PartitionConsumeAction {
                     entry.getPartition(),entry.getLastOffset() + 1L))
                 .collect(Collectors.toMap(Map.Entry::getKey,Map.Entry::getValue))
         )
+        .setId(tokenId)
         .build();
     String cursor = UUID.randomUUID().toString();
-    System.out.println(cursor);
+    System.out.println("cursor: " + cursor + " token id: " + tokenId);
     ctx.getKafkaCursorManager().setCursorPosition(cursor,new GsonBuilder().create().toJson(token));
-    return cursor;
+    return cursor + "_" + tokenId;
   }
 
   private ConsumeRecordData toConsumeRecordData(ConsumeRecord record, EmbeddedFormat format) {

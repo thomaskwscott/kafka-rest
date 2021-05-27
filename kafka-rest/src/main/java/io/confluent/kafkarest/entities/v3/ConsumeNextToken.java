@@ -30,16 +30,21 @@ public abstract class ConsumeNextToken {
   @JsonProperty("position")
   public abstract Map<Integer,Long> getPosition();
 
+  @JsonProperty("id")
+  public abstract String getId();
+
   public static Builder builder() {
     return new AutoValue_ConsumeNextToken.Builder();
   }
 
   @JsonCreator
   static ConsumeNextToken fromJson(
-      @JsonProperty("position") Map<Integer,Long> position
+      @JsonProperty("position") Map<Integer,Long> position,
+      @JsonProperty("id") String id
   ) {
     return builder()
         .setPosition(position)
+        .setId(id)
         .build();
   }
 
@@ -50,6 +55,8 @@ public abstract class ConsumeNextToken {
     }
 
     public abstract Builder setPosition(Map<Integer, Long> position);
+
+    public abstract Builder setId(String id);
 
     public abstract ConsumeNextToken build();
   }

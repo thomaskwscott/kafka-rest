@@ -29,6 +29,7 @@ import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 
 import java.util.Collections;
+import java.util.HashMap;
 
 /**
  * Shared, global state for the REST proxy server, including configuration and connection pools.
@@ -92,8 +93,13 @@ public class DefaultKafkaRestContext implements KafkaRestContext {
       try {
 
         admin = AdminClient.create(config.getAdminProperties());
+        NewTopic cursorTopic = new NewTopic(KafkaCursorManager.REST_PROXY_CURSORS, 1,(short)1);
+        cursorTopic.configs(new HashMap<String,String>() {{
+          put("cleanup.policy","compact,delete");
+          put("retention.ms","600000");
+        }});
         admin.createTopics(Collections.singletonList(
-            new NewTopic(KafkaCursorManager.REST_PROXY_CURSORS, 1,(short)1)
+          cursorTopic
         )).all().get();
       } catch (Exception e) {
         // todo do something here
